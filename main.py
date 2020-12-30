@@ -2,7 +2,6 @@ import os
 import torch
 import torchvision
 from torch.utils.data import random_split
-import splitfolders  # or import split_folders
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from torchvision.transforms import ToTensor
@@ -97,18 +96,94 @@ class DeviceDataLoader():
         """ return number of batch size """
         return len(self.dl)
 
+device = get_default_device()
+
+"""
+Now we can wrap our training and validation data loaders using DeviceDataLoader for automatically transferring batches
+of data to GPU (if available), and use to_device to move our model to GPU (if available)
+"""
+train_dl = DeviceDataLoader(train_dl, device)
+val_dl = DeviceDataLoader(val_dl, device)
 
 
+"""
+Let's define the model by extending an ImageClassificationBase class which contains helper methods for training
+and validation
+"""
+import torch.nn as nn
+import torch.nn.functional as F
 
+def accuracy(outputs, labels):
+    _, preds = torch.max(outputs, dim=1)
+    # get the accuracy of number preds correctly
+    return torch.tensor(torch.sum(preds == labels).item() / len(preds))
 
+class ImageClassificationBase(nn.Module):
+    def training_step(self, batch):
+        images, labels = batch
+        out = self(images) # Generate predictions
+        loss = F.cross_entropy(out, labels) # Calculate loss
+        return loss
 
+    def validation_step(self, batch):
+        images, labels = batch
+        out = self(images) # Generate predictions
+        loss = F.cross_entropy(out, labels) # Calculate loss
+        acc = accuracy(out, labels) # Calculate accuracy
+        return {
+            'val_loss': loss.detach(), 'val_acc': acc
+        }
 
+    def validation_epod_end(self, outputs):
+        batch_losses = [x['val_loss'] for x in outputs]
+        epoch_loss = torch.stack(batch_losses).mean() # Combine losses
+        batch_accs = [x['val_acc'] for x in outputs]
+        epoch_acc = torch.stack(batch_accs).mean() # Combine accuracies
+        return {
+            'val_loss': epoch_loss.item(),
+            'val_acc': epoch_acc.item()
+        }
+
+    def epoch_end(self, epoch, result):
+        print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
+            epoch, result['train_loss'], result['val_loss'], result['val_acc']))
+
+"""
+----------- Training the Model ----------------
+"""
+@torch.no_grad()
+def evaluate(model, val_loader):
+    model.eval()
+    outputs = [model.validation_step(batch) for batch in val_loader]
+    return model.validation_epoch_end(outputs)
+
+def fit(epochs, lr, model, train_loader, val_loader, opt_func=torch.optim.SGD):
+    history = []
+    optimizer = opt_func(model.parameters(), lr)
+    for epoch in range(epochs):
+        # Training phase
+        model.train()
+
+        train_losses = []
+
+        for batch in train_loader:
+            loss = model.training_step(batch)
+            train_losses.append(loss)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # validataion phase
+        result = evaluate(model, val_loader)
+        result['train_loss'] = torch.stack(train_losses).mean().item()
+        model.epoch_end(epoch, result);
+        history.append(result);
+    return history
 
 
 
 def main():
     # show_batch(train_dl)
-    device = get_default_device()
     print(device)
 
 if __name__ == "__main__":

@@ -76,10 +76,10 @@ def get_default_device():
         return torch.device('cpu')
 
 def to_device(data, device):
-    """ Move tensor(s) to chosen device """
+    """Move tensor(s) to chosen device"""
     if isinstance(data, (list, tuple)):
-        return [to_device() for x in data]
-    return data.to(device, non_blocking = True)
+        return [to_device(x, device) for x in data]
+    return data.to(device, non_blocking=True)
 
 class DeviceDataLoader():
     """ wrap a Dataloader to move data to a device """
@@ -134,7 +134,7 @@ class ImageClassificationBase(nn.Module):
             'val_loss': loss.detach(), 'val_acc': acc
         }
 
-    def validation_epod_end(self, outputs):
+    def validation_epoch_end(self, outputs):
         batch_losses = [x['val_loss'] for x in outputs]
         epoch_loss = torch.stack(batch_losses).mean() # Combine losses
         batch_accs = [x['val_acc'] for x in outputs]
@@ -157,11 +157,12 @@ def evaluate(model, val_loader):
     outputs = [model.validation_step(batch) for batch in val_loader]
     return model.validation_epoch_end(outputs)
 
+
 def fit(epochs, lr, model, train_loader, val_loader, opt_func=torch.optim.SGD):
     history = []
     optimizer = opt_func(model.parameters(), lr)
     for epoch in range(epochs):
-        # Training phase
+        # Training Phase
         model.train()
 
         train_losses = []
@@ -173,18 +174,103 @@ def fit(epochs, lr, model, train_loader, val_loader, opt_func=torch.optim.SGD):
             optimizer.step()
             optimizer.zero_grad()
 
-        # validataion phase
+        # Validation phase
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item()
-        model.epoch_end(epoch, result);
-        history.append(result);
+        model.epoch_end(epoch, result)
+        history.append(result)
     return history
 
+def plot_accuracies(history):
+    accuracies = [x['val_acc'] for x in history]
+    plt.plot(accuracies, '-x')
+    plt.xlabel('epoch')
+    plt.ylabel('accuracy')
+    plt.title('Accuracy vs. No. of epochs')
+    plt.show()
 
+def plot_losses(history):
+    train_losses = [x.get('train_loss') for x in history]
+    val_losses = [x['val_loss'] for x in history]
+    plt.plot(train_losses, '-bx')
+    plt.plot(val_losses, '-rx')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend(['Training', 'Validation'])
+    plt.title('Loss vs. No. of epochs')
+    plt.show()
+
+def predict_image(img, model):
+    # Convert to a batch of 1
+    xb = to_device(img.unsqueeze(0), device)
+    # Get predictions from model
+    yb = model(xb)
+    # Pick index with highest probability
+    _, preds  = torch.max(yb, dim=1)
+    # Retrieve the class label
+    return training_dataset.classes[preds[0].item()]
+
+
+"""
+----------- RESNET9 ---------------
+"""
+
+
+def conv_block(in_channels, out_channels, pool=False):
+    layers = [nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+              nn.BatchNorm2d(out_channels),
+              nn.ReLU(inplace=True)]
+
+    if pool: layers.append(nn.MaxPool2d(2))
+    return nn.Sequential(*layers)
+
+
+class ResNet9(ImageClassificationBase):
+    def __init__(self, in_channels, num_classes):
+        super().__init__()
+
+        self.conv1 = conv_block(in_channels, 64)
+        self.conv2 = conv_block(64, 128, pool=True)
+
+        self.res1 = nn.Sequential(conv_block(128, 128), conv_block(128, 128))
+
+        self.conv3 = conv_block(128, 256, pool=True)
+        self.conv4 = conv_block(256, 512, pool=True)
+
+        self.res2 = nn.Sequential(conv_block(512, 512), conv_block(512, 512))
+
+        self.classifier = nn.Sequential(nn.MaxPool2d(2),
+                                        nn.Flatten(),
+                                        nn.Linear(512 * 15 * 15, num_classes))
+
+    def forward(self, xb):
+        out = self.conv1(xb)
+        out = self.conv2(out)
+
+        out = self.res1(out) + out
+
+        out = self.conv3(out)
+        out = self.conv4(out)
+
+        out = self.res2(out) + out
+
+        out = self.classifier(out)
+        return out
+
+def training():
+    model_resnet = to_device(ResNet9(3, 5), device)  # num_classes=5
+    num_epochs = 1
+    otp_func = torch.optim.Adam
+    lr = 0.001
+    history3 = fit(num_epochs, lr, model_resnet, train_dl, val_dl, otp_func)
+    PATH = './weather.pth'
+    torch.save(model_resnet.state_dict(), PATH)
+    return history3
 
 def main():
     # show_batch(train_dl)
-    print(device)
+    training()
+
 
 if __name__ == "__main__":
     main()

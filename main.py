@@ -6,6 +6,7 @@ from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from torchvision.transforms import ToTensor
 import matplotlib.pyplot as plt
+import torchvision.models as models
 
 train_transformations = transforms.Compose([
     transforms.Resize((255, 255)), # resize input images to 255,255
@@ -24,7 +25,7 @@ classes = os.listdir(data_dir + "/Training")
 cloudy_files = os.listdir(data_dir + "/Training/cloudy")
 print('No. of training examples for cloudy images:', len(cloudy_files))
 
-# apply the train and test transformations
+# apply the Training and test transformations
 training_dataset = ImageFolder(data_dir + "/Training", transform=train_transformations)
 testing_dataset = ImageFolder(data_dir + "/Testing", transform=test_transformations)
 
@@ -157,26 +158,47 @@ def evaluate(model, val_loader):
     outputs = [model.validation_step(batch) for batch in val_loader]
     return model.validation_epoch_end(outputs)
 
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
-def fit(epochs, lr, model, train_loader, val_loader, opt_func=torch.optim.SGD):
+def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader, weight_decay=0, grad_clip=None, opt_func=torch.optim.SGD):
+    torch.cuda.empty_cache()
     history = []
-    optimizer = opt_func(model.parameters(), lr)
+
+    # setup custom optimizer with wight decay
+    optimizer = opt_func(model.parameters(), max_lr, weight_decay=weight_decay)
+
+    # setup one-cycle learning rate scheduler
+    sched = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+
     for epoch in range(epochs):
         # Training Phase
         model.train()
 
         train_losses = []
+        lrs = []
 
         for batch in train_loader:
             loss = model.training_step(batch)
             train_losses.append(loss)
             loss.backward()
+
+            # Gradient clipping
+            if grad_clip:
+                nn.utils.clip_grad_value_(model.parameters(), grad_clip)
+
             optimizer.step()
             optimizer.zero_grad()
+
+            # Record and update learning rate
+            lrs.append(get_lr(optimizer))
+            sched.step()
 
         # Validation phase
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item()
+        result['lrs'] = lrs
         model.epoch_end(epoch, result)
         history.append(result)
     return history
@@ -224,52 +246,61 @@ def conv_block(in_channels, out_channels, pool=False):
     if pool: layers.append(nn.MaxPool2d(2))
     return nn.Sequential(*layers)
 
-
-class ResNet9(ImageClassificationBase):
-    def __init__(self, in_channels, num_classes):
+class ResNet34CnnModel(ImageClassificationBase):
+    def __init__(self):
         super().__init__()
+        self.network = models.resnet34(pretrained=True)
 
-        self.conv1 = conv_block(in_channels, 64)
-        self.conv2 = conv_block(64, 128, pool=True)
-
-        self.res1 = nn.Sequential(conv_block(128, 128), conv_block(128, 128))
-
-        self.conv3 = conv_block(128, 256, pool=True)
-        self.conv4 = conv_block(256, 512, pool=True)
-
-        self.res2 = nn.Sequential(conv_block(512, 512), conv_block(512, 512))
-
-        self.classifier = nn.Sequential(nn.MaxPool2d(2),
-                                        nn.Flatten(),
-                                        nn.Linear(512 * 15 * 15, num_classes))
+        num_features = self.network.fc.in_features
+        self.network.fc = nn.Linear(num_features, 5)
 
     def forward(self, xb):
-        out = self.conv1(xb)
-        out = self.conv2(out)
+        xb = self.network(xb)
+        return xb
 
-        out = self.res1(out) + out
+    def freeze(self):
+        # To freeze the residual layers
+        for param in self.network.parameters():
+            param.require_grad = False
+        for param in self.network.fc.parameters():
+            param.require_grad = True
 
-        out = self.conv3(out)
-        out = self.conv4(out)
-
-        out = self.res2(out) + out
-
-        out = self.classifier(out)
-        return out
-
-def training():
-    model_resnet = to_device(ResNet9(3, 5), device)  # num_classes=5
-    num_epochs = 1
-    otp_func = torch.optim.Adam
-    lr = 0.001
-    history3 = fit(num_epochs, lr, model_resnet, train_dl, val_dl, otp_func)
-    PATH = './weather.pth'
-    torch.save(model_resnet.state_dict(), PATH)
-    return history3
+    def unfreeze(self):
+        # Unfreeze all layers
+        for param in self.network.parameters():
+            param.require_grad = True
 
 def main():
     # show_batch(train_dl)
-    training()
+    model_resnet34 = to_device(ResNet34CnnModel(), device)
+    print(model_resnet34)
+    model_resnet34.freeze()
+
+    epochs = 8
+    max_lr = 0.01
+    grad_clip = 0.1
+    weight_decay = 1e-4
+    opt_func = torch.optim.Adam
+
+    model_resnet34.unfreeze()
+
+    epochs = 8
+    history6 = fit_one_cycle(epochs, max_lr, model_resnet34, train_dl, val_dl,
+                             grad_clip=grad_clip,
+                             weight_decay=weight_decay,
+                             opt_func=opt_func)
+
+    model_resnet34.unfreeze()
+
+    epochs = 8
+    history6 += fit_one_cycle(epochs, 0.001, model_resnet34, train_dl, val_dl,
+                              grad_clip=grad_clip,
+                              weight_decay=weight_decay,
+                              opt_func=opt_func)
+
+    print(history6)
+    plot_accuracies(history6)
+    plt.show()
 
 
 if __name__ == "__main__":

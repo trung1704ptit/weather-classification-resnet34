@@ -7,6 +7,7 @@ from torchvision import transforms
 from torchvision.transforms import ToTensor
 import matplotlib.pyplot as plt
 import torchvision.models as models
+import numpy as np
 
 train_transformations = transforms.Compose([
     transforms.Resize((255, 255)), # resize input images to 255,255
@@ -19,6 +20,7 @@ test_transformations = transforms.Compose([
 ])
 
 data_dir= "./dataset"
+PATH = './weather.pth'
 
 classes = os.listdir(data_dir + "/Training")
 
@@ -270,6 +272,23 @@ class ResNet34CnnModel(ImageClassificationBase):
         for param in self.network.parameters():
             param.require_grad = True
 
+def training():
+    pass
+
+def plot_lrs(history):
+    lrs = np.concatenate([x.get('lrs', []) for x in history])
+    plt.plot(lrs)
+    plt.xlabel('Batch no.')
+    plt.ylabel('Learning rate')
+    plt.title('Learning Rate vs. Batch no.');
+
+def load_model():
+    model = torch.load(PATH)
+    return model
+
+def save_model(model):
+    torch.save(model, PATH)
+
 def main():
     # show_batch(train_dl)
     model_resnet34 = to_device(ResNet34CnnModel(), device)
@@ -298,10 +317,25 @@ def main():
                               weight_decay=weight_decay,
                               opt_func=opt_func)
 
+    # history6 = training()
+
     print(history6)
     plot_accuracies(history6)
+    plot_losses(history6)
+    plot_lrs(history6)
     plt.show()
 
+    test_loader = DeviceDataLoader(DataLoader(testing_dataset, batch_size*2), device)
+    result = evaluate(model_resnet34, test_loader)
+    print(result)
+
+    img, label = testing_dataset[76]
+    plt.imshow(img.permute(1, 2, 0))
+    print('Label:', training_dataset.classes[label], ', Predicted:', predict_image(img, model_resnet34))
+
+    img, label = testing_dataset[125]
+    plt.imshow(img.permute(1, 2, 0))
+    print('Label:', training_dataset.classes[label], ', Predicted:', predict_image(img, model_resnet34))
 
 if __name__ == "__main__":
     main()

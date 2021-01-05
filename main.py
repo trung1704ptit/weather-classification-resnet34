@@ -8,6 +8,8 @@ from torchvision.transforms import ToTensor
 import matplotlib.pyplot as plt
 import torchvision.models as models
 import numpy as np
+import torch.nn as nn
+import torch.nn.functional as F
 
 train_transformations = transforms.Compose([
     transforms.Resize((255, 255)), # resize input images to 255,255
@@ -24,22 +26,9 @@ PATH = './weather.pth'
 
 classes = os.listdir(data_dir + "/Training")
 
-cloudy_files = os.listdir(data_dir + "/Training/cloudy")
-print('No. of training examples for cloudy images:', len(cloudy_files))
-
 # apply the Training and test transformations
 training_dataset = ImageFolder(data_dir + "/Training", transform=train_transformations)
 testing_dataset = ImageFolder(data_dir + "/Testing", transform=test_transformations)
-
-print(training_dataset.classes)
-
-# viewing the images by matplotlib
-def show_example(img, label):
-    print('Label: ', training_dataset.classes[label], "("+str(label)+")")
-    plt.imshow(img.permute(1, 2, 0)) #change dimension from 3,255,255 to 255,255,3 for matplotlib
-    plt.show()
-# show_example(*training_dataset[700])
-
 
 
 # splitting training dataset into train_ds and val_ds
@@ -60,6 +49,8 @@ batch_size = 16
 train_dl = DataLoader(train_ds, batch_size, shuffle=True, num_workers=4, pin_memory=True)
 val_dl = DataLoader(val_ds, batch_size*2, num_workers=4, pin_memory=True)
 
+
+
 # We can look at the batches of images from dataset using the 'make_grid' of torchvision
 from torchvision.utils import make_grid
 def show_batch(dl):
@@ -71,6 +62,8 @@ def show_batch(dl):
         plt.show()
         break
 
+
+
 def get_default_device():
     """ Using GPU if available or CPU """
     if torch.cuda.is_available():
@@ -78,11 +71,15 @@ def get_default_device():
     else:
         return torch.device('cpu')
 
+
+
 def to_device(data, device):
     """Move tensor(s) to chosen device"""
     if isinstance(data, (list, tuple)):
         return [to_device(x, device) for x in data]
     return data.to(device, non_blocking=True)
+
+
 
 class DeviceDataLoader():
     """ wrap a Dataloader to move data to a device """
@@ -99,7 +96,9 @@ class DeviceDataLoader():
         """ return number of batch size """
         return len(self.dl)
 
+
 device = get_default_device()
+
 
 """
 Now we can wrap our training and validation data loaders using DeviceDataLoader for automatically transferring batches
@@ -113,8 +112,6 @@ val_dl = DeviceDataLoader(val_dl, device)
 Let's define the model by extending an ImageClassificationBase class which contains helper methods for training
 and validation
 """
-import torch.nn as nn
-import torch.nn.functional as F
 
 def accuracy(outputs, labels):
     _, preds = torch.max(outputs, dim=1)
@@ -151,6 +148,8 @@ class ImageClassificationBase(nn.Module):
         print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
             epoch, result['train_loss'], result['val_loss'], result['val_acc']))
 
+
+
 """
 ----------- Training the Model ----------------
 """
@@ -160,9 +159,13 @@ def evaluate(model, val_loader):
     outputs = [model.validation_step(batch) for batch in val_loader]
     return model.validation_epoch_end(outputs)
 
+
+
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
+
+
 
 def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader, weight_decay=0, grad_clip=None, opt_func=torch.optim.SGD):
     torch.cuda.empty_cache()
@@ -205,6 +208,8 @@ def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader, weight_decay=
         history.append(result)
     return history
 
+
+
 def plot_accuracies(history):
     accuracies = [x['val_acc'] for x in history]
     plt.plot(accuracies, '-x')
@@ -212,6 +217,8 @@ def plot_accuracies(history):
     plt.ylabel('accuracy')
     plt.title('Accuracy vs. No. of epochs')
     plt.show()
+
+
 
 def plot_losses(history):
     train_losses = [x.get('train_loss') for x in history]
@@ -223,6 +230,8 @@ def plot_losses(history):
     plt.legend(['Training', 'Validation'])
     plt.title('Loss vs. No. of epochs')
     plt.show()
+
+
 
 def predict_image(img, model):
     # Convert to a batch of 1
@@ -247,6 +256,8 @@ def conv_block(in_channels, out_channels, pool=False):
 
     if pool: layers.append(nn.MaxPool2d(2))
     return nn.Sequential(*layers)
+
+
 
 class ResNet34CnnModel(ImageClassificationBase):
     def __init__(self):
@@ -275,6 +286,8 @@ class ResNet34CnnModel(ImageClassificationBase):
 def training():
     pass
 
+
+
 def plot_lrs(history):
     lrs = np.concatenate([x.get('lrs', []) for x in history])
     plt.plot(lrs)
@@ -282,12 +295,18 @@ def plot_lrs(history):
     plt.ylabel('Learning rate')
     plt.title('Learning Rate vs. Batch no.');
 
+
+
 def load_model():
     model = torch.load(PATH)
     return model
 
+
+
 def save_model(model):
     torch.save(model, PATH)
+
+
 
 def main():
     # show_batch(train_dl)
@@ -336,6 +355,8 @@ def main():
     plt.imshow(img.permute(1, 2, 0))
     plt.show()
     print('Label:', training_dataset.classes[label], ', Predicted:', predict_image(img, model_resnet34))
+
+
 
 if __name__ == "__main__":
     main()

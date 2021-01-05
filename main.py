@@ -10,6 +10,7 @@ import torchvision.models as models
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data.dataloader import DataLoader
 
 train_transformations = transforms.Compose([
     transforms.Resize((255, 255)), # resize input images to 255,255
@@ -44,7 +45,6 @@ train_ds, val_ds = random_split(training_dataset, [train_size, val_size])
 
 
 # Create data loaders for training  and validation, to load data in batches
-from torch.utils.data.dataloader import DataLoader
 batch_size = 16
 train_dl = DataLoader(train_ds, batch_size, shuffle=True, num_workers=4, pin_memory=True)
 val_dl = DataLoader(val_ds, batch_size*2, num_workers=4, pin_memory=True)
@@ -52,16 +52,16 @@ val_dl = DataLoader(val_ds, batch_size*2, num_workers=4, pin_memory=True)
 
 
 # We can look at the batches of images from dataset using the 'make_grid' of torchvision
-from torchvision.utils import make_grid
-def show_batch(dl):
-    for images, labels in dl:
-        fig, ax = plt.subplots(figsize=(16, 8))
-        ax.set_xticks([]);
-        ax.set_yticks([])
-        ax.imshow(make_grid(images, nrow=16).permute(1,2,0))
-        plt.show()
-        break
-
+# from torchvision.utils import make_grid
+# def show_batch(dl):
+#     for images, labels in dl:
+#         fig, ax = plt.subplots(figsize=(16, 8))
+#         ax.set_xticks([]);
+#         ax.set_yticks([])
+#         ax.imshow(make_grid(images, nrow=16).permute(1,2,0))
+#         plt.show()
+#         break
+#
 
 
 def get_default_device():
@@ -117,6 +117,8 @@ def accuracy(outputs, labels):
     _, preds = torch.max(outputs, dim=1)
     # get the accuracy of number preds correctly
     return torch.tensor(torch.sum(preds == labels).item() / len(preds))
+
+
 
 class ImageClassificationBase(nn.Module):
     def training_step(self, batch):
@@ -175,7 +177,7 @@ def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader, weight_decay=
     optimizer = opt_func(model.parameters(), max_lr, weight_decay=weight_decay)
 
     # setup one-cycle learning rate scheduler
-    sched = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
 
     for epoch in range(epochs):
         # Training Phase
@@ -198,7 +200,7 @@ def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader, weight_decay=
 
             # Record and update learning rate
             lrs.append(get_lr(optimizer))
-            sched.step()
+            scheduler.step()
 
         # Validation phase
         result = evaluate(model, val_loader)

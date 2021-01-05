@@ -292,7 +292,6 @@ def save_model(model):
 def main():
     # show_batch(train_dl)
     model_resnet34 = to_device(ResNet34CnnModel(), device)
-    print(model_resnet34)
     model_resnet34.freeze()
 
     epochs = 8
@@ -319,7 +318,6 @@ def main():
 
     # history6 = training()
 
-    print(history6)
     plot_accuracies(history6)
     plot_losses(history6)
     plot_lrs(history6)
@@ -331,10 +329,12 @@ def main():
 
     img, label = testing_dataset[76]
     plt.imshow(img.permute(1, 2, 0))
+    plt.show()
     print('Label:', training_dataset.classes[label], ', Predicted:', predict_image(img, model_resnet34))
 
     img, label = testing_dataset[125]
     plt.imshow(img.permute(1, 2, 0))
+    plt.show()
     print('Label:', training_dataset.classes[label], ', Predicted:', predict_image(img, model_resnet34))
 
 if __name__ == "__main__":
